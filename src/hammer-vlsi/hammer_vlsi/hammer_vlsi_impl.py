@@ -332,7 +332,6 @@ class HammerPlaceAndRouteTool(HammerTool):
             raise TypeError("output_ilms must be a List[ILMStruct]")
         self.attr_setter("_output_ilms", value)
 
-
     @property
     def output_gds(self) -> str:
         """
@@ -770,6 +769,11 @@ class HammerLVSTool(HammerSignoffTool):
 
     ### Outputs ###
     ### END Generated interface HammerLVSTool ###
+
+
+class HammerFormalTool(HammerTool):
+    ### Generated interface HammerFormalTool ###
+    pass
 
 
 class HasSDCSupport(HammerTool):
