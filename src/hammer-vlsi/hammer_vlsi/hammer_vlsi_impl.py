@@ -771,8 +771,8 @@ class HammerLVSTool(HammerSignoffTool):
     ### END Generated interface HammerLVSTool ###
 
 
-class HammerFormalTool(HammerTool):
-    ### Generated interface HammerFormalTool ###
+class HammerFormalLECTool(HammerTool):
+    ### Generated interface HammerFormalLECTool ###
     pass
 
 

@@ -21,7 +21,7 @@ from .hooks import HammerToolHookAction
 from .hammer_vlsi_impl import HammerVLSISettings, HammerPlaceAndRouteTool, HammerSynthesisTool, \
     HammerSignoffTool, HammerDRCTool, HammerLVSTool, \
     HierarchicalMode, load_tool, PlacementConstraint, \
-    HammerFormalTool, HammerPowerTool
+    HammerFormalLECTool, HammerPowerTool
 from hammer_logging import HammerVLSIFileLogger, HammerVLSILogging, HammerVLSILoggingContext
 from .submit_command import HammerSubmitCommand
 
@@ -103,7 +103,7 @@ class HammerDriver:
         self.par_tool = None  # type: Optional[HammerPlaceAndRouteTool]
         self.drc_tool = None  # type: Optional[HammerDRCTool]
         self.lvs_tool = None  # type: Optional[HammerLVSTool]
-        self.formal_tool = None  # type: Optional[HammerFormalTool]
+        self.formal_tool = None  # type: Optional[HammerFormalLECTool]
         self.power_tool = None  # type: Optional[HammerPowerTool]
 
         # Initialize tool hooks. Used to specify resume/pause hooks after custom hooks have been registered.
@@ -432,7 +432,7 @@ class HammerDriver:
             path=self.database.get_setting("vlsi.core.formal_tool_path"),
             tool_name=formal_tool_name
         )
-        assert isinstance(formal_tool_get, HammerFormalTool), "Formal tool must be a HammerFormalTool"
+        assert isinstance(formal_tool_get, HammerFormalLECTool), "Formal tool must be a HammerFormalLECTool"
         formal_tool = formal_tool_get  # type: HammerTool
         formal_tool.name = formal_tool_name
         formal_tool.logger = self.log.context("formal")
