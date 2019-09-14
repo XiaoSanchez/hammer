@@ -21,6 +21,7 @@ import hammer_config
 from hammer_utils import reverse_dict, deepdict, optional_map, get_or_else, add_dicts, coerce_to_grid
 from hammer_tech import Library, ExtraLibrary
 
+import textwrap
 from .constraints import *
 from .units import VoltageValue, TimeValue
 
@@ -231,7 +232,11 @@ class HammerSRAMGeneratorTool(HammerTool):
     # in techX16 you can generate only ever generate a single SRAM per run but can
     # generate multiple corners at once
     def generate_all_srams_and_corners(self) -> bool:
-        srams = reduce(list.__add__, list(map(lambda c: self.generate_all_srams(c), self.get_mmmc_corners()))) # type: List[ExtraLibrary]
+        srams = []  # type: List[ExtraLibrary]
+        srams2dlist = list(map(lambda c: self.generate_all_srams(c), 
+            self.get_mmmc_corners()))
+        if len(srams2dlist) > 0:
+            srams = reduce(list.__add__, srams2dlist)
         self.output_libraries = srams
         return True
 
@@ -1308,19 +1313,37 @@ class HasSDCSupport(HammerTool):
         groups = {} # type: Dict[str, List[str]]
         ungrouped_clocks = [] # type: List[str]
 
+        # set time unit in sdc. this is supported in genus
+        # TODO: is this supported in innovus
+        output.append("set_time_unit -nanoseconds 1.0")
+        output.append("set_load_unit -picofarads 1.0")
+        #time_unit = self.get_time_unit().value_prefix + self.get_time_unit().unit
+
         clocks = self.get_clock_ports()
-        time_unit = self.get_time_unit().value_prefix + self.get_time_unit().unit
         for clock in clocks:
-            # TODO: FIXME This assumes that library units are always in ns!!!
             if get_or_else(clock.generated, False):
-                output.append("create_generated_clock -name {n} -source {m_path} -divide_by {div} {path}".
-                        format(n=clock.name, m_path=clock.source_path, div=clock.divisor, path=clock.path))
+                output.append(textwrap.dedent("""
+                    create_generated_clock \\
+                        -name {n} \\
+                        -source {m_path} \\
+                        -divide_by {div} \\
+                        {path}
+                    """).format(n=clock.name, m_path=clock.source_path, 
+                    div=clock.divisor, path=clock.path))
             elif clock.path is not None:
-                output.append("create_clock {0} -name {1} -period {2}".format(clock.path, clock.name, clock.period.value_in_units(time_unit)))
+                output.append(textwrap.dedent("""
+                    create_clock {0} \\
+                        -name {1} \\
+                        -period {2}
+                    """
+                    ).format(clock.path, clock.name, 
+                        clock.period.value_in_units("ns")))
             else:
-                output.append("create_clock {0} -name {0} -period {1}".format(clock.name, clock.period.value_in_units(time_unit)))
+                output.append("create_clock {0} -name {0} -period {1}".format(
+                    clock.name, clock.period.value_in_units("ns")))
             if clock.uncertainty is not None:
-                output.append("set_clock_uncertainty {1} [get_clocks {0}]".format(clock.name, clock.uncertainty.value_in_units(time_unit)))
+                output.append("set_clock_uncertainty {1} [get_clocks {0}]".format(
+                    clock.name, clock.uncertainty.value_in_units("ns")))
             if clock.group is not None:
                 if clock.group in groups:
                     groups[clock.group].append(clock.name)
@@ -1329,10 +1352,11 @@ class HasSDCSupport(HammerTool):
             else:
                 ungrouped_clocks.append(clock.name)
         if len(groups):
+            # TODO: is this used properly...
             output.append("set_clock_groups -asynchronous {grouped} {ungrouped}".format(
-                    grouped = " ".join(["{{ {c} }}".format(c=" ".join(clks)) for clks in groups.values()]),
-                    ungrouped = " ".join(["{{ {c} }}".format(c=clk) for clk in ungrouped_clocks])
-                    ))
+                grouped = " ".join(["{{ {c} }}".format(c=" ".join(clks)) for clks in groups.values()]),
+                ungrouped = " ".join(["{{ {c} }}".format(c=clk) for clk in ungrouped_clocks])
+            ))
 
         output.append("\n")
         return "\n".join(output)
@@ -1342,31 +1366,61 @@ class HasSDCSupport(HammerTool):
         """Generate a fragment for I/O pin constraints."""
         output = []  # type: List[str]
 
-        default_output_load = float(self.get_setting("vlsi.inputs.default_output_load"))
+        default_output_load = \
+            CapacitanceValue(self.get_setting("vlsi.inputs.default_output_load"))
 
-        # Specify default load.
+        default_max_transition = \
+            TimeValue(self.get_setting("vlsi.inputs.default_max_transition"))
+
+        default_clock_max_transition = \
+            TimeValue(self.get_setting("vlsi.inputs.default_clock_max_transition"))
+
+        default_max_fanout = \
+            int(self.get_setting("vlsi.inputs.default_max_fanout"))
+
+        #--------------------------------------------------------------------
+
+        # set time unit in sdc. this is supported in genus
+        output.append("set_time_unit -nanoseconds 1.0")
+        output.append("set_load_unit -picofarads 1.0")
+
+        # Specify default load, transitions
         output.append("set_load {load} [all_outputs]".format(
-            load=default_output_load
+            load=default_output_load.value_in_units("pf")
+        ))
+        output.append("set_max_transition {slew} [current_design]".format(
+            slew=default_max_transition.value_in_units("ns")
+        ))
+        output.append("set_max_transition {slew} [all_clocks]".format(
+            slew=default_clock_max_transition.value_in_units("ns")
+        ))
+        output.append("set_max_fanout {slew} [current_design]".format(
+            slew=default_max_fanout
         ))
 
         # Also specify loads for specific pins.
         for load in self.get_output_load_constraints():
             output.append("set_load {load} [get_port \"{name}\"]".format(
-                load=load.load,
+                load=load.load.value_in_units("pf"),
                 name=load.name
             ))
 
         # Also specify delays for specific pins.
         for delay in self.get_delay_constraints():
-            output.append("set_{direction}_delay {delay} -clock {clock} [get_port \"{name}\"]".format(
-                delay=delay.delay.value_in_units(self.get_time_unit().value_prefix + self.get_time_unit().unit),
+            output.append(textwrap.dedent("""
+                set_{direction}_delay {delay} \\
+                    -clock {clock} \\
+                    [get_port \"{name}\"]
+                """.format(
+                delay=delay.delay.value_in_units("ns"),
                 clock=delay.clock,
                 direction=delay.direction,
                 name=delay.name
-            ))
+            )))
 
         # Custom sdc constraints that are verbatim appended
-        custom_sdc_constraints = self.get_setting("vlsi.inputs.custom_sdc_constraints")  # type: List[str]
+        custom_sdc_constraints = \
+            self.get_setting("vlsi.inputs.custom_sdc_constraints")  # type: List[str]
         for custom in custom_sdc_constraints:
             output.append(str(custom))
 
@@ -1447,9 +1501,25 @@ class CadenceTool(HasSDCSupport, HasCPFSupport, HasUPFSupport, TCLTool, HammerTo
         pre_filters = optional_map(corner, lambda c: [self.filter_for_mmmc(voltage=c.voltage,
                                                                            temp=c.temp)])  # type: Optional[List[Callable[[hammer_tech.Library],bool]]]
 
-        lib_args = self.technology.read_libs([hammer_tech.filters.timing_lib_with_ecsm_filter],
-                                             hammer_tech.HammerTechnologyUtils.to_plain_item,
-                                             extra_pre_filters=pre_filters)
+        #TODO:  make this configurable to nldm/lib-subsets for pipecleaning
+        #---------------------------------------------------------------------
+        from library_filter import LibraryFilter
+        def paths_func(lib: "Library") -> List[str]:
+            # Choose ccs if available, if not, nldm.
+            if lib.provides[0].vt != "HN":
+                return []
+            elif lib.nldm_liberty_file is not None:
+                return [lib.nldm_liberty_file]
+            else:
+                return []
+        lib_args = self.technology.read_libs([LibraryFilter.new("timing_lib", 
+                "NLDM timing lib only", paths_func=paths_func, is_file=True)],
+             hammer_tech.HammerTechnologyUtils.to_plain_item,
+             extra_pre_filters=pre_filters)
+        #lib_args = self.technology.read_libs([hammer_tech.filters.timing_lib_with_ecsm_filter],
+        #                                     hammer_tech.HammerTechnologyUtils.to_plain_item,
+        #                                     extra_pre_filters=pre_filters)
+        #---------------------------------------------------------------------
         return " ".join(lib_args)
 
     def get_mmmc_qrc(self, corner: MMMCCorner) -> str:
